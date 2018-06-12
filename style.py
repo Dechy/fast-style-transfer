@@ -125,7 +125,8 @@ def main():
 
     style_target = get_img(options.style)
     if not options.slow:
-        content_targets = _get_files(options.train_path)
+        with log_time_usage("get images files"):
+            content_targets = _get_files(options.train_path)
     elif options.test:
         content_targets = [options.test]
 
