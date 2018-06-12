@@ -116,49 +116,49 @@ def optimize(content_targets, style_target, content_weight, style_weight,
             num_examples = len(content_targets)
             print("Start training of epoch:{} with n={} instances".format(epoch, num_examples))
             iterations = 0
+            with log_time_usage("Epoch:{} done in".format(epoch)):
+                while iterations * batch_size < num_examples:
+                    start_time = time.time()
+                    curr = iterations * batch_size
+                    step = curr + batch_size
+                    X_batch = np.zeros(batch_shape, dtype=np.float32)
+                    for j, img_p in enumerate(content_targets[curr:step]):
+                       X_batch[j] = get_img(img_p, (img_width,img_height,3)).astype(np.float32)
 
-            while iterations * batch_size < num_examples:
-                start_time = time.time()
-                curr = iterations * batch_size
-                step = curr + batch_size
-                X_batch = np.zeros(batch_shape, dtype=np.float32)
-                for j, img_p in enumerate(content_targets[curr:step]):
-                   X_batch[j] = get_img(img_p, (img_width,img_height,3)).astype(np.float32)
+                    iterations += 1
+                    assert X_batch.shape[0] == batch_size
 
-                iterations += 1
-                assert X_batch.shape[0] == batch_size
-
-                feed_dict = {
-                   X_content:X_batch
-                }
-
-                summary, _ = sess.run([merged, train_step], feed_dict=feed_dict)
-                train_writer.add_summary(summary, iterations)
-
-                end_time = time.time()
-                delta_time = end_time - start_time
-                if debug:
-                    print("UID: %s, batch time: %s" % (uid, delta_time))
-                is_print_iter = int(iterations) % print_iterations == 0
-                if slow:
-                    is_print_iter = epoch % print_iterations == 0
-                is_last = epoch == epochs - 1 and iterations * batch_size >= num_examples
-                should_print = is_print_iter or is_last
-                if should_print:
-                    to_get = [style_loss, content_loss, tv_loss, loss, preds]
-                    test_feed_dict = {
+                    feed_dict = {
                        X_content:X_batch
                     }
 
-                    tup = sess.run(to_get, feed_dict = test_feed_dict)
-                    _style_loss,_content_loss,_tv_loss,_loss,_preds = tup
-                    losses = (_style_loss, _content_loss, _tv_loss, _loss)
+                    summary, _ = sess.run([merged, train_step], feed_dict=feed_dict)
+                    train_writer.add_summary(summary, iterations)
+
+                    end_time = time.time()
+                    delta_time = end_time - start_time
+                    if debug:
+                        print("UID: %s, batch time: %s" % (uid, delta_time))
+                    is_print_iter = int(iterations) % print_iterations == 0
                     if slow:
-                       _preds = vgg.unprocess(_preds)
-                    else:
-                       saver = tf.train.Saver()
-                       res = saver.save(sess, save_path)
-                    yield(_preds, losses, iterations, epoch)
+                        is_print_iter = epoch % print_iterations == 0
+                    is_last = epoch == epochs - 1 and iterations * batch_size >= num_examples
+                    should_print = is_print_iter or is_last
+                    if should_print:
+                        to_get = [style_loss, content_loss, tv_loss, loss, preds]
+                        test_feed_dict = {
+                           X_content:X_batch
+                        }
+
+                        tup = sess.run(to_get, feed_dict = test_feed_dict)
+                        _style_loss,_content_loss,_tv_loss,_loss,_preds = tup
+                        losses = (_style_loss, _content_loss, _tv_loss, _loss)
+                        if slow:
+                           _preds = vgg.unprocess(_preds)
+                        else:
+                           saver = tf.train.Saver()
+                           res = saver.save(sess, save_path)
+                        yield(_preds, losses, iterations, epoch)
 
 def _tensor_size(tensor):
     from operator import mul
