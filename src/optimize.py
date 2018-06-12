@@ -3,7 +3,8 @@ import functools
 import vgg, pdb, time
 import tensorflow as tf, numpy as np, os
 import transform
-from utils import get_img
+from utils import get_img, log_time_usage
+
 
 STYLE_LAYERS = ('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1')
 CONTENT_LAYER = 'relu4_2'
@@ -11,24 +12,30 @@ DEVICES = 'CUDA_VISIBLE_DEVICES'
 
 # np arr, np arr
 def optimize(content_targets, style_target, content_weight, style_weight,
-             tv_weight, vgg_path, epochs=2, print_iterations=1000,
+             tv_weight, vgg_path, tensorboard_dir, epochs=2, print_iterations=1000,
              batch_size=4, save_path='saver/fns.ckpt', slow=False,
              learning_rate=1e-3, debug=False):
+
     if slow:
         batch_size = 1
     mod = len(content_targets) % batch_size
     if mod > 0:
         print("Train set has been trimmed slightly..")
-        content_targets = content_targets[:-mod] 
+        content_targets = content_targets[:-mod]
 
     style_features = {}
-
-    batch_shape = (batch_size,256,256,3)
+    img_height = img_width = 256  # change batch shape ffrom 256 to 128 to see if it is less memory intensive
+    batch_shape = (batch_size,img_width,img_height,3)
     style_shape = (1,) + style_target.shape
-    print(style_shape)
+    print("Style shape:", style_shape)
+    print('Save tensorboard loags into: ', tensorboard_dir)
 
-    # precompute style features
-    with tf.Graph().as_default(), tf.device('/cpu:0'), tf.Session() as sess:
+    # fix error : could not create cudnn handle: CUDNN_STATUS_NOT_INITIALIZED
+    gpu_options = tf.GPUOptions(allow_growth=True)
+    session_config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False, gpu_options=gpu_options)
+
+    print("Precompute style features")
+    with tf.Graph().as_default(), tf.device('/cpu:0'), log_time_usage("Precompute style features done in"), tf.Session() as sess:
         style_image = tf.placeholder(tf.float32, shape=style_shape, name='style_image')
         style_image_pre = vgg.preprocess(style_image)
         net = vgg.net(vgg_path, style_image_pre)
@@ -39,6 +46,7 @@ def optimize(content_targets, style_target, content_weight, style_weight,
             gram = np.matmul(features.T, features) / features.size
             style_features[layer] = gram
 
+    print("Enter the main graph")
     with tf.Graph().as_default(), tf.Session() as sess:
         X_content = tf.placeholder(tf.float32, shape=batch_shape, name="X_content")
         X_pre = vgg.preprocess(X_content)
@@ -61,9 +69,11 @@ def optimize(content_targets, style_target, content_weight, style_weight,
 
         content_size = _tensor_size(content_features[CONTENT_LAYER])*batch_size
         assert _tensor_size(content_features[CONTENT_LAYER]) == _tensor_size(net[CONTENT_LAYER])
+
         content_loss = content_weight * (2 * tf.nn.l2_loss(
             net[CONTENT_LAYER] - content_features[CONTENT_LAYER]) / content_size
         )
+        tf.summary.scalar('content', content_loss)
 
         style_losses = []
         for style_layer in STYLE_LAYERS:
@@ -77,6 +87,7 @@ def optimize(content_targets, style_target, content_weight, style_weight,
             style_losses.append(2 * tf.nn.l2_loss(grams - style_gram)/style_gram.size)
 
         style_loss = style_weight * functools.reduce(tf.add, style_losses) / batch_size
+        tf.summary.scalar('style_loss', style_loss)
 
         # total variation denoising
         tv_y_size = _tensor_size(preds[:,1:,:,:])
@@ -84,25 +95,35 @@ def optimize(content_targets, style_target, content_weight, style_weight,
         y_tv = tf.nn.l2_loss(preds[:,1:,:,:] - preds[:,:batch_shape[1]-1,:,:])
         x_tv = tf.nn.l2_loss(preds[:,:,1:,:] - preds[:,:,:batch_shape[2]-1,:])
         tv_loss = tv_weight*2*(x_tv/tv_x_size + y_tv/tv_y_size)/batch_size
-
+        tf.summary.scalar('tv_loss', tv_loss)
         loss = content_loss + style_loss + tv_loss
+        tf.summary.scalar('loss', loss)
 
         # overall loss
-        train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
+        with tf.name_scope('train'):
+            train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
+
+        # Merge all the summaries and write them out to data/logs (by default)
+        merged = tf.summary.merge_all()
+        print("merged: ", merged)
+        train_writer = tf.summary.FileWriter(tensorboard_dir + '/train',
+                                              sess.graph)
         sess.run(tf.global_variables_initializer())
         import random
         uid = random.randint(1, 100)
         print("UID: %s" % uid)
         for epoch in range(epochs):
             num_examples = len(content_targets)
+            print("Start training of epoch:{} with n={} instances".format(epoch, num_examples))
             iterations = 0
+
             while iterations * batch_size < num_examples:
                 start_time = time.time()
                 curr = iterations * batch_size
                 step = curr + batch_size
                 X_batch = np.zeros(batch_shape, dtype=np.float32)
                 for j, img_p in enumerate(content_targets[curr:step]):
-                   X_batch[j] = get_img(img_p, (256,256,3)).astype(np.float32)
+                   X_batch[j] = get_img(img_p, (img_width,img_height,3)).astype(np.float32)
 
                 iterations += 1
                 assert X_batch.shape[0] == batch_size
@@ -111,7 +132,9 @@ def optimize(content_targets, style_target, content_weight, style_weight,
                    X_content:X_batch
                 }
 
-                train_step.run(feed_dict=feed_dict)
+                summary, _ = sess.run([merged, train_step], feed_dict=feed_dict)
+                train_writer.add_summary(summary, iterations)
+
                 end_time = time.time()
                 delta_time = end_time - start_time
                 if debug:
