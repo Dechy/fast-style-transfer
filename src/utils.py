@@ -1,4 +1,19 @@
 import scipy.misc, numpy as np, os, sys
+from contextlib import contextmanager
+import time
+
+@contextmanager
+def log_time_usage(prefix=""):
+    '''log the time usage in a code block
+    prefix: the prefix text to show
+    '''
+    start = time.time()
+    try:
+        yield
+    finally:
+        end = time.time()
+        elapsed_seconds = float("%.2f" % (end - start))
+        print('{}: elapsed seconds: {}'.format(prefix, elapsed_seconds))
 
 def save_img(out_path, img):
     img = np.clip(img, 0, 255).astype(np.uint8)
@@ -30,4 +45,3 @@ def list_files(in_path):
         break
 
     return files
-
