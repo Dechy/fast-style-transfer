@@ -31,7 +31,9 @@ def optimize(content_targets, style_target, content_weight, style_weight,
     print('Save tensorboard loags into: ', tensorboard_dir)
 
     # fix error : could not create cudnn handle: CUDNN_STATUS_NOT_INITIALIZED
-    gpu_options = tf.GPUOptions(allow_growth=True)
+    gpu_options = tf.GPUOptions(allow_growth=True,
+    # per_process_gpu_memory_fraction=0.05
+    )
     session_config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False, gpu_options=gpu_options)
 
     print("Precompute style features")
@@ -105,9 +107,12 @@ def optimize(content_targets, style_target, content_weight, style_weight,
 
         # Merge all the summaries and write them out to data/logs (by default)
         merged = tf.summary.merge_all()
-        print("merged: ", merged)
-        train_writer = tf.summary.FileWriter(tensorboard_dir + '/train',
-                                              sess.graph)
+
+        if tensorboard_dir :
+            print('Save TensorBoard summary in : ', tensorboard_dir)
+            train_writer = tf.summary.FileWriter(tensorboard_dir + '/train', sess.graph)
+            test_writer = tf.summary.FileWriter(tensorboard_dir + '/test', sess.graph)
+
         sess.run(tf.global_variables_initializer())
         import random
         uid = random.randint(1, 100)
@@ -117,8 +122,10 @@ def optimize(content_targets, style_target, content_weight, style_weight,
             print("Start training of epoch:{} with n={} instances".format(epoch, num_examples))
             iterations = 0
             with log_time_usage("Epoch:{} done in".format(epoch)):
+                start_time = step_time = time.time()
+                nb_iterations = num_examples // batch_size
                 while iterations * batch_size < num_examples:
-                    start_time = time.time()
+                    batch_start_time = time.time()
                     curr = iterations * batch_size
                     step = curr + batch_size
                     X_batch = np.zeros(batch_shape, dtype=np.float32)
@@ -132,33 +139,50 @@ def optimize(content_targets, style_target, content_weight, style_weight,
                        X_content:X_batch
                     }
 
-                    summary, _ = sess.run([merged, train_step], feed_dict=feed_dict)
-                    train_writer.add_summary(summary, iterations)
+                    if tensorboard_dir:
+                        summary, _ = sess.run([merged, train_step], feed_dict=feed_dict)
+                        train_writer.add_summary(summary, iterations)
+                    else:
+                        sess.run([train_step], feed_dict=feed_dict)
 
-                    end_time = time.time()
-                    delta_time = end_time - start_time
+
+                    batch_end_time = time.time()
+                    batch_delta_time = batch_end_time - batch_start_time
                     if debug:
-                        print("UID: %s, batch time: %s" % (uid, delta_time))
+                        print("UID: %s, iterations: %s batch time: %s" % (uid, iterations, batch_delta_time))
                     is_print_iter = int(iterations) % print_iterations == 0
                     if slow:
                         is_print_iter = epoch % print_iterations == 0
                     is_last = epoch == epochs - 1 and iterations * batch_size >= num_examples
                     should_print = is_print_iter or is_last
                     if should_print:
-                        to_get = [style_loss, content_loss, tv_loss, loss, preds]
+                        # compute avg batch time
+                        end_time = time.time()
+                        delta_time = end_time - step_time
+                        total_time = end_time - start_time
+                        step_time = end_time
+                        avg_batch_time = delta_time / print_iterations
+                        eta_in_hours = ((nb_iterations - iterations)*avg_batch_time
+                            - nb_iterations*(epochs - 1 - epoch))/3600
+
+                        to_get = [merged, style_loss, content_loss, tv_loss, loss, preds]
                         test_feed_dict = {
                            X_content:X_batch
                         }
 
                         tup = sess.run(to_get, feed_dict = test_feed_dict)
-                        _style_loss,_content_loss,_tv_loss,_loss,_preds = tup
+                        if tensorboard_dir:
+                            test_writer.add_summary(summary, iterations)
+
+                        summary, _style_loss,_content_loss,_tv_loss,_loss,_preds = tup
                         losses = (_style_loss, _content_loss, _tv_loss, _loss)
                         if slow:
                            _preds = vgg.unprocess(_preds)
                         else:
                            saver = tf.train.Saver()
                            res = saver.save(sess, save_path)
-                        yield(_preds, losses, iterations, epoch)
+                        time_info = (avg_batch_time, total_time, eta_in_hours)
+                        yield(_preds, losses, iterations, epoch, time_info)
 
 def _tensor_size(tensor):
     from operator import mul

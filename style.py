@@ -17,7 +17,6 @@ CHECKPOINT_DIR = 'checkpoints'
 CHECKPOINT_ITERATIONS = 2000
 VGG_PATH = 'data/imagenet-vgg-verydeep-19.mat'
 TRAIN_PATH = 'data/train2014'
-TENSORBOARD_PATH = 'data/logs'
 BATCH_SIZE = 4
 DEVICE = '/gpu:0'
 FRAC_GPU = 1
@@ -92,7 +91,7 @@ def build_parser():
 
     parser.add_argument('--tensorboard-dir', type=str,
                         dest='tensorboard_dir',
-                        help='TensorBoard log directory', default=TENSORBOARD_PATH)
+                        help='TensorBoard log directory', default=False)
 
     return parser
 
@@ -158,10 +157,10 @@ def main():
 
     print("Start training")
     with log_time_usage("Training completed in"):
-        for preds, losses, i, epoch in optimize(*args, **kwargs):
+        for preds, losses, i, epoch, time_info in optimize(*args, **kwargs):
             style_loss, content_loss, tv_loss, loss = losses
 
-            print('Epoch %d, Iteration: %d, Loss: %s' % (epoch, i, loss))
+            print('Epoch %d, Iteration: %d, Loss: %s, AVG batch time: %.2f, total_time: %.2f, ETA (in h): %.2f' % (epoch, i, loss, *time_info))
             to_print = (style_loss, content_loss, tv_loss)
             print('style: %s, content:%s, tv: %s' % to_print)
             if options.test:
