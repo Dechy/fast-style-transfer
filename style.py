@@ -118,13 +118,14 @@ def _get_files(img_dir):
 
 
 def main():
+    print("Enter main")
     parser = build_parser()
     options = parser.parse_args()
     check_opts(options)
-
+    print("Get image target")
     style_target = get_img(options.style)
     if not options.slow:
-        with log_time_usage("get images files"):
+        with log_time_usage("get images targets"):
             content_targets = _get_files(options.train_path)
     elif options.test:
         content_targets = [options.test]
