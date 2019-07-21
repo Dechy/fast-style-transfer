@@ -37,6 +37,7 @@ def get_img(src, img_size=False):
    return img
 
 def exists(p, msg):
+    print(p)
     assert os.path.exists(p), msg
 
 def list_files(in_path):
