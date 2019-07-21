@@ -22,7 +22,7 @@ def save_img(out_path, img):
 
 def scale_img(style_path, style_scale):
     scale = float(style_scale)
-    o0, o1, o2 = imageio.imread(style_path, mode='RGB').shape
+    o0, o1, o2 = imageio.imread(style_path, pilmode='RGB').shape
     scale = float(style_scale)
     new_shape = (int(o0 * scale), int(o1 * scale), o2)
     style_target = _get_img(style_path, img_size=new_shape)
